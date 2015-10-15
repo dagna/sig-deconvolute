@@ -1,7 +1,9 @@
+import sys, getopt, nimfa, numpy.matlib
 from numpy import *
-import sys, getopt, os, numpy.matlib
 
 WEAK_MUTATION_PERCENT = 0.01
+RANK = 25
+
 def strip_first_col(fname, delimiter=None):
     with open(fname, 'r') as fin:
         for line in fin:
@@ -54,9 +56,23 @@ def bootstrapCancerGenomes(genomes):
     return ans
 
 #run this from from z=1 to min (K,G) for edited genomes, and 1000 iterations for each z. iterations per core = numcores/1000  
-def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract):
+def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, w, h):
     for i in range(totalIterationsPerCore):
-        print(i)
+        #replacing zeroes w small number
+        bootstrapGenomes = numpy.maximum(bootstrapCancerGenomes(genomes), numpy.finfo(numpy.float32).eps)
+        nmf = nimfa.Nmf(bootstrapGenomes, max_iter=3, rank=numberSignaturesToExtract, update='divergence', objective='conn', conn_change=10000, test_conv=10,)
+        nmf_fit = nmf()
+        p = nmf_fit.basis()
+        e = nmf_fit.coef()
+        for i in range(numberSignaturesToExtract):
+            
+            w[:,i] = p[:,i].reshape(size(genomes,0))
+            h[i,:] = e[i, :].reshape(size(genomes,1))
+
+            total = sum(w[:,i],0)
+            w[:,i] = w[:, i] / total
+            h[i,:] = h[i,:] * total
+
 
 
 
@@ -70,6 +86,8 @@ def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract):
 #take out the labels that came with the dataset
 inputfile = fetch_arg(sys.argv[1:])
 data = loadtxt(strip_first_col(inputfile), skiprows=1);
-bootstrap = bootstrapCancerGenomes(data)
+w = numpy.zeros(shape=(size(data,0), 25))
+h = numpy.zeros(shape=(25, size(data,1)))
+extract(data, 1, 25, w, h)
 
 
