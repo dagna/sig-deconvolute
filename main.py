@@ -1,8 +1,12 @@
 import sys, getopt, nimfa, numpy.matlib
+import multiprocessing as mp
 from numpy import *
 
 WEAK_MUTATION_PERCENT = 0.01
-RANK = 25
+NUM_CORES = 4
+NUM_SIGNATURES = 25 # same as rank
+NUM_BOOTSTRAPS = 4 # normally 1000
+ITERATIONS_PER_CORE = NUM_BOOTSTRAPS / NUM_CORES
 
 def strip_first_col(fname, delimiter=None):
     with open(fname, 'r') as fin:
@@ -55,25 +59,30 @@ def bootstrapCancerGenomes(genomes):
 
     return ans
 
-#run this from from z=1 to min (K,G) for edited genomes, and 1000 iterations for each z. iterations per core = numcores/1000  
-def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, w, h):
+#run this from from z=1 to min (K,G) for edited genomes, and 1000 iterations for each z. iterations per core = 1000/numcores
+def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, WPerCore, HPerCore, genomeErrorsPerCore, genomesReconstructedPerCore ):
+
+    totalMutationTypes = size(data,0)
+    totalGenomes = size(data, 1)
+    processCount = 0
+
     for i in range(totalIterationsPerCore):
         #replacing zeroes w small number
+
         bootstrapGenomes = numpy.maximum(bootstrapCancerGenomes(genomes), numpy.finfo(numpy.float32).eps)
-        nmf = nimfa.Nmf(bootstrapGenomes, max_iter=3, rank=numberSignaturesToExtract, update='divergence', objective='conn', conn_change=10000, test_conv=10,)
+        nmf = nimfa.Nmf(bootstrapGenomes, max_iter=3, rank=numberSignaturesToExtract, update='divergence', objective='conn', conn_change=10000, test_conv=10,) # max iter is actual 1 mill
         nmf_fit = nmf()
-        p = nmf_fit.basis()
-        e = nmf_fit.coef()
-        for i in range(numberSignaturesToExtract):
-            
-            w[:,i] = p[:,i].reshape(size(genomes,0))
-            h[i,:] = e[i, :].reshape(size(genomes,1))
+        for j in range(numberSignaturesToExtract):
+        
+            total = sum(nmf_fit.basis()[:,j])
+            nmf_fit.basis()[:,j] = nmf_fit.basis()[:,j] / total
+            nmf_fit.coef()[j,:] = nmf_fit.coef()[j,:] / total
 
-            total = sum(w[:,i],0)
-            w[:,i] = w[:, i] / total
-            h[i,:] = h[i,:] * total
-
-
+        genomeErrorsPerCore[:, :, i] = bootstrapGenomes - nmf_fit.basis() * nmf_fit.coef()
+        genomesReconstructedPerCore[:, :, i] = nmf_fit.basis() * nmf_fit.coef()
+        WPerCore[:, processCount : (processCount + numberSignaturesToExtract)] = nmf_fit.basis()
+        HPerCore[processCount : (processCount + numberSignaturesToExtract), :] = nmf_fit.coef()
+        processCount = processCount + numberSignaturesToExtract
 
 
 
@@ -86,8 +95,40 @@ def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, w, h):
 #take out the labels that came with the dataset
 inputfile = fetch_arg(sys.argv[1:])
 data = loadtxt(strip_first_col(inputfile), skiprows=1);
-w = numpy.zeros(shape=(size(data,0), 25))
-h = numpy.zeros(shape=(25, size(data,1)))
-extract(data, 1, 25, w, h)
+#data = removeWeak(data)
+totalMutationTypes = size(data,0)
+totalGenomes = size(data, 1)
+
+Wall = numpy.zeros(shape=(totalMutationTypes, NUM_SIGNATURES * ITERATIONS_PER_CORE * NUM_CORES))
+Hall = numpy.zeros(shape=( NUM_SIGNATURES * ITERATIONS_PER_CORE * NUM_CORES , totalGenomes))
+genomeErrors = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE * NUM_CORES))
+genomesReconstructed = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE * NUM_CORES))
+
+
+
+for i in range(NUM_CORES): #smpd statement in matlab
+    WPerCore = numpy.zeros(shape=(totalMutationTypes, NUM_SIGNATURES * ITERATIONS_PER_CORE ))
+    HPerCore = numpy.zeros(shape=( NUM_SIGNATURES * ITERATIONS_PER_CORE , totalGenomes))
+    # every iteration has an error in its reconstruction (which is a matrix)
+    genomeErrorsPerCore = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE))
+    genomesReconstructedPerCore = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE))
+
+    extract(data, ITERATIONS_PER_CORE, NUM_SIGNATURES, WPerCore, HPerCore, genomeErrorsPerCore, genomesReconstructedPerCore)
+
+    stepAll = NUM_SIGNATURES * ITERATIONS_PER_CORE
+    startAll = stepAll * i
+    endAll = startAll + stepAll
+    Wall[:, startAll:endAll] = WPerCore
+    Hall[startAll:endAll, :] = HPerCore
+
+    stepAll = ITERATIONS_PER_CORE
+    startAll = stepAll * i
+    endAll = startAll + stepAll
+    genomeErrors[:, :, startAll:endAll] = genomeErrorsPerCore
+    genomesReconstructed[:, :, startAll:endAll] = genomesReconstructedPerCore
+
+
+
+# extract(data, 1, 25, w, h)
 
 
