@@ -3,6 +3,7 @@ import multiprocessing as mp
 from numpy import *
 
 WEAK_MUTATION_PERCENT = 0.01
+PERCENT_RECON_REMOVE = 0.07
 NUM_CORES = 4
 NUM_SIGNATURES = 25 # same as rank
 NUM_BOOTSTRAPS = 4 # normally 1000
@@ -84,6 +85,29 @@ def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, WPerCore
         HPerCore[processCount : (processCount + numberSignaturesToExtract), :] = nmf_fit.coef()
         processCount = processCount + numberSignaturesToExtract
 
+
+def filterOutIterations(Wall, Hall, genomeErrors, numberSignaturesToExtract, genomesReconstructed, removePercentage):
+
+    totalIterations = size(Wall, 1) / numberSignaturesToExtract
+    totalRemoveIter = int(round(removePercentage * totalIterations))
+
+    closenessGenomes = numpy.zeros(shape=(totalIterations, 1))
+    for i in range(totalIterations):
+        closenessGenomes[i] = numpy.linalg.norm(genomeErrors[:, :, i])
+
+    index = numpy.argsort(closenessGenomes, 0)[::-1]
+    removeIterations = index[0:totalRemoveIter]
+
+    removeIterationSets = numpy.zeros(shape=(numberSignaturesToExtract * totalRemoveIter, 1))
+    
+
+    for i in range(totalRemoveIter):
+        iStart = numberSignaturesToExtract * removeIterations[i]
+        iEnd = numberSignaturesToExtract * (removeIterations[i] + 1)
+
+        removeIterationSets[numberSignaturesToExtract*i : numberSignaturesToExtract*(i+1), :] = numpy.arange(iStart,iEnd).reshape(len(numpy.arange(iStart,iEnd)), 1)
+
+    return removeIterationSets
 
 
 
