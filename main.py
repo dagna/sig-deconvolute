@@ -136,13 +136,13 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
     for iInitData in range(min(TOTAL_INIT_CONDITIONS, totalIter)):
         bootstrapIndexStart = randBootstrapIndices[iInitData]
         bootstrapIndexEnd = bootstrapIndexStart + numberSignaturesToExtract
-        centroids = Wall[:, bootstrapIndexStart:bootstrapIndexEnd].copy() #otherwise will modify original Wall :(
-        oldCentroids = numpy.random.rand(size(centroids,0), size(centroids,1))
+        pcentroids = Wall[:, bootstrapIndexStart:bootstrapIndexEnd].copy() #otherwise will modify original Wall :(
+        oldCentroids = numpy.random.rand(size(pcentroids,0), size(pcentroids,1))
         convergeCount = 0
 
         for iRep in range(TOTAL_REPLICATES):
-            allDist = scipy.spatial.distance.squareform( scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (centroids, Wall) , axis=1)), distanceMetric ) )
-            centroidDist = numpy.transpose(allDist[0:size(centroids, 1), size(centroids, 1) : size(allDist, 1)])
+            allDist = scipy.spatial.distance.squareform( scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (pcentroids, Wall) , axis=1)), distanceMetric ) )
+            centroidDist = numpy.transpose(allDist[0:size(pcentroids, 1), size(pcentroids, 1) : size(allDist, 1)])
 
             jRange = numpy.random.permutation(numberSignaturesToExtract) #randomize the order in which clusters get to be assigned topics every replicate
             for jIndex in range(numberSignaturesToExtract):
@@ -157,44 +157,43 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
 
             maxDistToNewCentroids = 0
             for i in range(numberSignaturesToExtract):
-                centroids[:, i] = numpy.mean(Wall[:, (idx == i).flatten()], axis=1) #calculate new centroids
-                maxDistToNewCentroids = max(maxDistToNewCentroids, scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (centroids[:,i].reshape(size(centroids[:,i]), 1), oldCentroids[:, i].reshape(size(centroids[:,i]), 1)) , axis=1)), metric=distanceMetric ))
+                pcentroids[:, i] = numpy.mean(Wall[:, (idx == i).flatten()], axis=1) #calculate new centroids
+                maxDistToNewCentroids = max(maxDistToNewCentroids, scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (pcentroids[:,i].reshape(size(pcentroids[:,i]), 1), oldCentroids[:, i].reshape(size(pcentroids[:,i]), 1)) , axis=1)), metric=distanceMetric ))
 
             if maxDistToNewCentroids < CONVERG_CUTOFF:
                 convergeCount+= 1
             else:
                 convergeCount = 0
-                oldCentroids = centroids
+                oldCentroids = pcentroids
 
             if convergeCount == CONVERG_ITER:
                 break
 
         for i in range(numberSignaturesToExtract):
-            clusterDist = scipy.spatial.distance.squareform( scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (centroids[:,i].reshape(size(centroids[:,i]), 1), Wall[:, (idx==i).flatten()]) , axis=1)), distanceMetric ) )
+            clusterDist = scipy.spatial.distance.squareform( scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (pcentroids[:,i].reshape(size(pcentroids[:,i]), 1), Wall[:, (idx==i).flatten()]) , axis=1)), distanceMetric ) )
             clusterCompactness[i,:] = clusterDist[0, 1:size(clusterDist, 1)]
 
         if minClusterDist > mean(clusterCompactness[:]):
             minClusterDist = mean(clusterCompactness[:])
-            centroidsFinal = centroids
+            centroidsFinal = pcentroids
             idxFinal = idx
             clusterCompactnessFinal = clusterCompactness
 
-    centroids = numpy.transpose(centroidsFinal)
+    pcentroids = numpy.transpose(centroidsFinal)
     idx = idxFinal
     clusterCompactness = clusterCompactnessFinal
 
 
     file = scipy.io.loadmat("./idxtest.mat")
-    idx = file['idx']
-    idx = idx - 1
-    centroids = file['centroids']
-    clusterCompactness = file['clusterCompactness']# put a breakpoint here
+    idx[...] = file['idx'] - 1
+    pcentroids = file['centroids']
+    clusterCompactness[...] = file['clusterCompactness']# put a breakpoint here
     centDist = mean(clusterCompactness, axis=1) #same
 
     # rearranging centroids with tightest clusters first
     centDistInd = numpy.argsort(centDist) #same
-    clusterCompactness = clusterCompactness[centDistInd, :] #same
-    centroids = centroids[centDistInd, :]
+    clusterCompactness[...] = clusterCompactness[centDistInd, :] #same
+    pcentroids = pcentroids[centDistInd, :]
     idxNew = numpy.copy(idx)
     # change naming of indices so best cluster is 1
     for i in range(numberSignaturesToExtract):
@@ -202,23 +201,24 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
      #this doesnt do what you think it does.
 
 
-    idx = idxNew
+    idx[...] = idxNew
 
 
 
     if numberSignaturesToExtract > 1:
-        processStab = sklearn.metrics.silhouette_samples(numpy.transpose(Wall), idx.ravel(), metric=DISTANCE_METRIC)
+        processStab[...] = sklearn.metrics.silhouette_samples(numpy.transpose(Wall), idx.ravel(), metric=DISTANCE_METRIC)
         for i in range(numberSignaturesToExtract):
             processStabAvg[0,i] = mean(processStab[(idx==i).ravel()])
     else:
-        allDist = scipy.spatial.distance.squareform( scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (numpy.transpose(centroids), Wall) , axis=1)), distanceMetric ) )        
-        processStab = 1 - numpy.transpose(allDist[0:size(numpy.transpose(centroids), 1), size(numpy.transpose(centroids), 1): size(allDist, 1) ])
+        allDist = scipy.spatial.distance.squareform( scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (numpy.transpose(pcentroids), Wall) , axis=1)), distanceMetric ) )        
+        processStab[...] = 1 - numpy.transpose(allDist[0:size(numpy.transpose(pcentroids), 1), size(numpy.transpose(pcentroids), 1): size(allDist, 1) ])
         processStabAvg = mean(processStab)
 
     for i in range(numberSignaturesToExtract):
         centroidsStd[:,i] = std(Wall[:, (idx==i).flatten()], axis=1, ddof=1)
 
-    centroids = numpy.transpose(centroids)
+    pcentroids = numpy.transpose(pcentroids)
+    centroids[...] = pcentroids
 
     # the indices i in idxS are assigned are assigned the indices of idx that were assigned to cluster i
     for i in range(0, size(Wall,1), numberSignaturesToExtract):
@@ -232,7 +232,6 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
         exposure[i, :] = mean(Hall[(idx==i).flatten(), :], axis=0)
         exposureStd[i, :] = std(Hall[(idx==i).flatten(),:], axis=0, ddof=1)
 
-    print 'yay'
 
 # Add zeros at indices that weak mutations were removed at previously
 def addWeak(mutationTypesToAddSet, processes, processesStd, Wall, genomeErrors, genomesReconstructed):
@@ -325,8 +324,8 @@ centroids = numpy.zeros((size(Wall,0), NUM_SIGNATURES))
 centroidsStd = numpy.zeros((size(centroids, 0), size(centroids,1))) # will later represent clustered signatures
 exposure = numpy.zeros((NUM_SIGNATURES,size(Hall,1)))
 exposureStd = numpy.zeros((NUM_SIGNATURES,size(Hall,1)))
-clusterCompactness = numpy.zeros((NUM_SIGNATURES, size(Wall, 1) / NUM_SIGNATURES))
-idx = numpy.zeros(shape=(size(Hall, 0), 1))
+clusterCompactness = numpy.zeros((NUM_SIGNATURES, size(Wall, 1) / NUM_SIGNATURES)) #not the same
+idx = numpy.zeros(shape=(size(Hall, 0), 1)) #not the same
 idxS = numpy.zeros(shape=(size(Hall, 0), 1))
 processStab = numpy.zeros(shape=(size(Wall,1)))
 processStabAvg = numpy.zeros(shape=(1, NUM_SIGNATURES))
@@ -336,6 +335,6 @@ custKMeans(Wall, Hall, NUM_SIGNATURES, TOTAL_REPLICATES, DISTANCE_METRIC, centro
 
 
 
-# extract(data, 1, 25, w, h)
+extract(data, 1, 25, w, h)
 
 
