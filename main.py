@@ -136,7 +136,7 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
     for iInitData in range(min(TOTAL_INIT_CONDITIONS, totalIter)):
         bootstrapIndexStart = randBootstrapIndices[iInitData]
         bootstrapIndexEnd = bootstrapIndexStart + numberSignaturesToExtract
-        centroids = Wall[:, bootstrapIndexStart:bootstrapIndexEnd]
+        centroids = Wall[:, bootstrapIndexStart:bootstrapIndexEnd].copy() #otherwise will modify original Wall :(
         oldCentroids = numpy.random.rand(size(centroids,0), size(centroids,1))
         convergeCount = 0
 
@@ -156,9 +156,8 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
 
 
             maxDistToNewCentroids = 0
-            tempWall = numpy.copy(Wall) # to avoid very strange bugs from using masked array on Wall
             for i in range(numberSignaturesToExtract):
-                centroids[:, i] = numpy.mean(tempWall[:, (idx == i).flatten()], axis=1) #calculate new centroids the line that FUCKS EVERYHTING UP
+                centroids[:, i] = numpy.mean(Wall[:, (idx == i).flatten()], axis=1) #calculate new centroids
                 maxDistToNewCentroids = max(maxDistToNewCentroids, scipy.spatial.distance.pdist( numpy.transpose(numpy.concatenate( (centroids[:,i].reshape(size(centroids[:,i]), 1), oldCentroids[:, i].reshape(size(centroids[:,i]), 1)) , axis=1)), metric=distanceMetric ))
 
             if maxDistToNewCentroids < CONVERG_CUTOFF:
