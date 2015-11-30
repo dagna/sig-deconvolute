@@ -122,10 +122,10 @@ def filterOutIterations(Wall, Hall, genomeErrors, numberSignaturesToExtract, gen
 def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distanceMetric, centroids, centroidsStd, exposure, exposureStd, idx, idxS, processStab, processStabAvg, clusterCompactness):
 
     #the topics within a single bootstrap must be assigned to different clusters
-    def checkWall(Wall):
+    def checkWall(Hall):
         file = scipy.io.loadmat("./tryit.mat")
-        for i in range(size(Wall, 1)):
-            if ~(Wall[:,i] == file['Wall'][:,i]).all():
+        for i in range(size(Hall, 1)):
+            if ~(Hall[:,i] == file['Hall'][:,i]).all():
                 print 'mismatching column:{}'.format(str(i))
 
     minClusterDist = BIG_NUMBER # to be considered an acceptable cluster
@@ -216,22 +216,23 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
         processStabAvg = mean(processStab)
 
     for i in range(numberSignaturesToExtract):
-        centroidsStd[i,:] = std(Wall[:, (idx==i).flatten()], axis=1, ddof=1)
+        centroidsStd[:,i] = std(Wall[:, (idx==i).flatten()], axis=1, ddof=1)
 
     centroids = numpy.transpose(centroids)
-    centroidsStd = numpy.transpose(centroidsStd)
 
     # the indices i in idxS are assigned are assigned the indices of idx that were assigned to cluster i
-    for i in range(0, size(Wall,2), numberSignaturesToExtract):
+    for i in range(0, size(Wall,1), numberSignaturesToExtract):
         iEnd = i + numberSignaturesToExtract
         idxG = idx[i:iEnd]
 
         for j in range(numberSignaturesToExtract):
-            idxS[i+j,:] = numpy.nonzero(idxG == j)
+            idxS[i+j,:] = numpy.nonzero(idxG == j)[0]
 
     for i in range(numberSignaturesToExtract):
-        exposure[i, :] = mean(Hall[idx==i, :])
+        exposure[i, :] = mean(Hall[(idx==i).flatten(), :], axis=0)
         exposureStd[i, :] = std(Hall[(idx==i).flatten(),:], axis=0, ddof=1)
+
+    print 'yay'
 
 # Add zeros at indices that weak mutations were removed at previously
 def addWeak(mutationTypesToAddSet, processes, processesStd, Wall, genomeErrors, genomesReconstructed):
@@ -321,7 +322,7 @@ genomesReconstructed = file['genomesReconstructed']
 
 
 centroids = numpy.zeros((size(Wall,0), NUM_SIGNATURES)) 
-centroidsStd = numpy.zeros((size(centroids))) # will later represent clustered signatures
+centroidsStd = numpy.zeros((size(centroids, 0), size(centroids,1))) # will later represent clustered signatures
 exposure = numpy.zeros((NUM_SIGNATURES,size(Hall,1)))
 exposureStd = numpy.zeros((NUM_SIGNATURES,size(Hall,1)))
 clusterCompactness = numpy.zeros((NUM_SIGNATURES, size(Wall, 1) / NUM_SIGNATURES))
