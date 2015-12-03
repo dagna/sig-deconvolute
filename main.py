@@ -8,7 +8,7 @@ WEAK_MUTATION_PERCENT = 0.01 # (removeWeak)
 PERCENT_RECON_REMOVE = 0.07 # (filterOutIterations)
 NUM_CORES = 4
 NUM_SIGNATURES = 25 # same as rank
-NUM_BOOTSTRAPS = 4 # normally 1000
+NUM_BOOTSTRAPS = 28 # normally 1000
 ITERATIONS_PER_CORE = NUM_BOOTSTRAPS / NUM_CORES
 BIG_NUMBER = 100 # assign as distance when a vector has been chosen for a cluster so doesn't get picked again (kmeans)
 CONVERG_CUTOFF = 0.005 # considered a negligible change in cosine distance, used to declare convergence (kmeans)
@@ -183,17 +183,21 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
     idx = idxFinal
     clusterCompactness = clusterCompactnessFinal
 
-
-    file = scipy.io.loadmat("./idxtest.mat")
-    idx[...] = file['idx'] - 1
+    file = scipy.io.loadmat("./more code/idxtest.mat")
     pcentroids = file['centroids']
-    clusterCompactness[...] = file['clusterCompactness']# put a breakpoint here
+    idx = file['idx'] - 1
+    clusterCompactness = file['clusterCompactness']
+
+
     centDist = mean(clusterCompactness, axis=1) #same
 
     # rearranging centroids with tightest clusters first
     centDistInd = numpy.argsort(centDist) #same
     clusterCompactness[...] = clusterCompactness[centDistInd, :] #same
     pcentroids = pcentroids[centDistInd, :]
+
+
+
     idxNew = numpy.copy(idx)
     # change naming of indices so best cluster is 1
     for i in range(numberSignaturesToExtract):
@@ -232,16 +236,21 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
         exposure[i, :] = mean(Hall[(idx==i).flatten(), :], axis=0)
         exposureStd[i, :] = std(Hall[(idx==i).flatten(),:], axis=0, ddof=1)
 
-
 # Add zeros at indices that weak mutations were removed at previously
-def addWeak(mutationTypesToAddSet, processes, processesStd, Wall, genomeErrors, genomesReconstructed):
+def addWeak(mutationTypesToAddSet, processesOld, processesStdOld, wallOld, genomeErrorsOld, genomesReconstructedOld, processes, processesStd, Wall, genomeErrors, genomesReconstructed ):
 
-    totalMutTypes = size(Wall, 0) + size(mutationTypesToAddSet)
+    
 
-    origArrayIndex = 1
+    origArrayIndex = 0
     for i in range(totalMutTypes):
         if ~any(mutationTypesToAddSet==i):
-            break
+            processes[i, :] = processesOld[origArrayIndex, :]
+            processesStd[i, :] = processesStdOld[origArrayIndex, :]
+            Wall[i, :] = wallOld[origArrayIndex, :]
+            genomeErrors[i, :, :] = genomeErrorsOld[origArrayIndex, :, :]
+            genomesReconstructed[i, :, :] = genomesReconstructedOld[origArrayIndex, :, :]
+            
+            origArrayIndex = origArrayIndex + 1
 
 
 
@@ -311,7 +320,7 @@ Hall = numpy.delete(Hall, removeIterationSets, 0)
 genomeErrors = numpy.delete(genomeErrors, removeIterationSets, 2)
 genomesReconstructed = numpy.delete(genomesReconstructed, removeIterationSets, 2)
 
-file = scipy.io.loadmat("/Users/Andromeda/Desktop/sig-deconvolute/filtered.mat")
+file = scipy.io.loadmat("./more code/filtered.mat")
 Wall = file['Wall']
 Hall = file['Hall']
 genomeErrors = file['genomeErrors']
@@ -331,6 +340,16 @@ processStab = numpy.zeros(shape=(size(Wall,1)))
 processStabAvg = numpy.zeros(shape=(1, NUM_SIGNATURES))
 
 custKMeans(Wall, Hall, NUM_SIGNATURES, TOTAL_REPLICATES, DISTANCE_METRIC, centroids, centroidsStd, exposure, exposureStd, idx, idxS, processStab, processStabAvg, clusterCompactness)
+
+totalMutTypes = size(Wall, 0) + size(indicesToRemove)
+processes = numpy.zeros((totalMutTypes, NUM_SIGNATURES))
+processesStd = numpy.zeros((totalMutTypes, NUM_SIGNATURES))
+WallNew = numpy.zeros((totalMutTypes, size(Wall,1)))
+genomeErrorsNew = numpy.zeros((totalMutTypes, size(genomeErrors, 1), NUM_BOOTSTRAPS))
+genomesReconstructedNew = numpy.zeros((totalMutTypes, size(genomeErrors, 1), NUM_BOOTSTRAPS))
+
+addWeak(numpy.array([50, 2, 26, 54, 21]), centroids,centroidsStd, Wall, genomeErrors, genomesReconstructed, processes, processesStd, WallNew, genomeErrorsNew, genomesReconstructedNew)
+
 
 
 
