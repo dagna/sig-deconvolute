@@ -95,6 +95,7 @@ def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, WPerCore
         processCount = processCount + numberSignaturesToExtract
 
 
+#throw out bottom removePercentage of bootstraps based on fro norm
 def filterOutIterations(Wall, Hall, genomeErrors, numberSignaturesToExtract, genomesReconstructed, removePercentage):
 
     totalIterations = size(Wall, 1) / numberSignaturesToExtract
@@ -131,7 +132,7 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
     minClusterDist = BIG_NUMBER # to be considered an acceptable cluster
     totalIter = size(Wall, 1) / numberSignaturesToExtract
     bootstrapIndices = numpy.array(range(0, size(Wall,1), numberSignaturesToExtract))
-    randBootstrapIndices = bootstrapIndices[numpy.random.permutation(totalIter)]
+    randBootstrapIndices = bootstrapIndices[numpy.random.permutation(totalIter)] #randomly choose one of the bootstraps as starting centroids
 
     for iInitData in range(min(TOTAL_INIT_CONDITIONS, totalIter)):
         bootstrapIndexStart = randBootstrapIndices[iInitData]
@@ -164,7 +165,7 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
                 convergeCount+= 1
             else:
                 convergeCount = 0
-                oldCentroids = pcentroids
+                oldCentroids[...] = pcentroids
 
             if convergeCount == CONVERG_ITER:
                 break
@@ -175,19 +176,13 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
 
         if minClusterDist > mean(clusterCompactness[:]):
             minClusterDist = mean(clusterCompactness[:])
-            centroidsFinal = pcentroids
-            idxFinal = idx
-            clusterCompactnessFinal = clusterCompactness
+            centroidsFinal = copy(pcentroids)
+            idxFinal = copy(idx)
+            clusterCompactnessFinal = copy(clusterCompactness)
 
     pcentroids = numpy.transpose(centroidsFinal)
     idx = idxFinal
     clusterCompactness = clusterCompactnessFinal
-
-    file = scipy.io.loadmat("./more code/idxtest.mat")
-    pcentroids = file['centroids']
-    idx = file['idx'] - 1
-    clusterCompactness = file['clusterCompactness']
-
 
     centDist = mean(clusterCompactness, axis=1) #same
 
@@ -205,7 +200,7 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
      #this doesnt do what you think it does.
 
 
-    idx[...] = idxNew
+    idx[...] = idxNew # on the left side it becomes a copy
 
 
 
@@ -280,9 +275,9 @@ def addWeak(mutationTypesToAddSet, processesOld, processesStdOld, wallOld, genom
 
 #take out the labels that came with the dataset
 inputfile = fetch_arg(sys.argv[1:])
-data = loadtxt(strip_first_col(inputfile), skiprows=1);
-indicesToRemove = removeWeak(data)
-data = numpy.delete(data, indicesToRemove, 0)
+originalGenomes = loadtxt(strip_first_col(inputfile), skiprows=1);
+indicesToRemove = removeWeak(originalGenomes)
+data = numpy.delete(originalGenomes, indicesToRemove, 0)
 totalMutationTypes = size(data,0)
 totalGenomes = size(data, 1)
 
@@ -350,10 +345,12 @@ genomesReconstructedNew = numpy.zeros((totalMutTypes, size(genomeErrors, 1), NUM
 
 addWeak(numpy.array([50, 2, 26, 54, 21]), centroids,centroidsStd, Wall, genomeErrors, genomesReconstructed, processes, processesStd, WallNew, genomeErrorsNew, genomesReconstructedNew)
 
+error = numpy.linalg.norm(originalGenomes - centroids.dot(exposure))
+
+print 'Error : {}'.format(str(error))
 
 
 
-
-extract(data, 1, 25, w, h)
+#extract(data, 1, 25, w, h)
 
 
