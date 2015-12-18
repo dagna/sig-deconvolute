@@ -7,16 +7,20 @@ from numpy import *
 WEAK_MUTATION_PERCENT = 0.01 # (removeWeak)
 PERCENT_RECON_REMOVE = 0.07 # (filterOutIterations)
 NUM_CORES = 4
-NUM_SIGNATURES = 25 # same as rank
-NUM_BOOTSTRAPS = 28 # normally 1000
+NUM_SIGNATURES = 27 # same as rank
+NUM_BOOTSTRAPS = 1000
 ITERATIONS_PER_CORE = NUM_BOOTSTRAPS / NUM_CORES
+MAX_ITER = 1000000 # (nmf)
+UPDATE_EQUATION = 'divergence' # or 'euclidean' (nmf)
+OBJECTIVE_FUNC = 'conn' # or 'fro' or 'div' (nmf)
+CONN_CHANGE = 10000 # (nmf)
+TEST_CONV = 10 # (nmf)
 BIG_NUMBER = 100 # assign as distance when a vector has been chosen for a cluster so doesn't get picked again (kmeans)
 CONVERG_CUTOFF = 0.005 # considered a negligible change in cosine distance, used to declare convergence (kmeans)
 CONVERG_ITER = 10 # num times accept negligible change before declaring convergence (kmeans)
 TOTAL_REPLICATES = 100 # max times will assign new centroids (kmeans)
 TOTAL_INIT_CONDITIONS = 5 # num times to run kmeans w different bootstraps as starting
 DISTANCE_METRIC = 'cosine' # used to compare topics/signatures
-
 
 def strip_first_col(fname, delimiter=None):
     with open(fname, 'r') as fin:
@@ -77,10 +81,9 @@ def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, WPerCore
     processCount = 0
 
     for i in range(totalIterationsPerCore):
-        #replacing zeroes w small number
-
+        #replacing zeroes w small number to avoid underflow
         bootstrapGenomes = numpy.maximum(bootstrapCancerGenomes(genomes), numpy.finfo(numpy.float32).eps)
-        nmf = nimfa.Nmf(bootstrapGenomes, max_iter=3, rank=numberSignaturesToExtract, update='divergence', objective='conn', conn_change=10000, test_conv=10,) # max iter is actual 1 mill
+        nmf = nimfa.Nmf(bootstrapGenomes, max_iter=MAX_ITER, rank=numberSignaturesToExtract, update=UPDATE_EQUATION, objective=OBJECTIVE_FUNC, conn_change=CONN_CHANGE, test_conv=TEST_CONV) # max iter is actual 1 mill
         nmf_fit = nmf()
         for j in range(numberSignaturesToExtract):
         
@@ -93,7 +96,6 @@ def extract(genomes, totalIterationsPerCore, numberSignaturesToExtract, WPerCore
         WPerCore[:, processCount : (processCount + numberSignaturesToExtract)] = nmf_fit.basis()
         HPerCore[processCount : (processCount + numberSignaturesToExtract), :] = nmf_fit.coef()
         processCount = processCount + numberSignaturesToExtract
-
 
 #throw out bottom removePercentage of bootstraps based on fro norm
 def filterOutIterations(Wall, Hall, genomeErrors, numberSignaturesToExtract, genomesReconstructed, removePercentage):
@@ -110,7 +112,6 @@ def filterOutIterations(Wall, Hall, genomeErrors, numberSignaturesToExtract, gen
 
     removeIterationSets = numpy.zeros(shape=(numberSignaturesToExtract * totalRemoveIter, 1))
     
-
     for i in range(totalRemoveIter):
         iStart = numberSignaturesToExtract * removeIterations[i]
         iEnd = numberSignaturesToExtract * (removeIterations[i] + 1)
@@ -120,14 +121,8 @@ def filterOutIterations(Wall, Hall, genomeErrors, numberSignaturesToExtract, gen
     removeIterationSets = removeIterationSets.astype(int)
     return removeIterationSets
 
+#the topics within a single bootstrap must be assigned to different clusters
 def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distanceMetric, centroids, centroidsStd, exposure, exposureStd, idx, idxS, processStab, processStabAvg, clusterCompactness):
-
-    #the topics within a single bootstrap must be assigned to different clusters
-    def checkWall(Hall):
-        file = scipy.io.loadmat("./tryit.mat")
-        for i in range(size(Hall, 1)):
-            if ~(Hall[:,i] == file['Hall'][:,i]).all():
-                print 'mismatching column:{}'.format(str(i))
 
     minClusterDist = BIG_NUMBER # to be considered an acceptable cluster
     totalIter = size(Wall, 1) / numberSignaturesToExtract
@@ -137,7 +132,7 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
     for iInitData in range(min(TOTAL_INIT_CONDITIONS, totalIter)):
         bootstrapIndexStart = randBootstrapIndices[iInitData]
         bootstrapIndexEnd = bootstrapIndexStart + numberSignaturesToExtract
-        pcentroids = Wall[:, bootstrapIndexStart:bootstrapIndexEnd].copy() #otherwise will modify original Wall :(
+        pcentroids = Wall[:, bootstrapIndexStart:bootstrapIndexEnd].copy() # override Python aliasing
         oldCentroids = numpy.random.rand(size(pcentroids,0), size(pcentroids,1))
         convergeCount = 0
 
@@ -147,14 +142,13 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
 
             jRange = numpy.random.permutation(numberSignaturesToExtract) #randomize the order in which clusters get to be assigned topics every replicate
             for jIndex in range(numberSignaturesToExtract):
-                j = jRange[jIndex] #WHY DOES IT ASSIGN SAME NUMBER TWICE
+                j = jRange[jIndex]
 
                 for i in range(0, size(Wall,1), numberSignaturesToExtract):
                     iRange = range(i, i + numberSignaturesToExtract)
                     Ind = numpy.argmin(centroidDist[iRange, j])
                     centroidDist[iRange[Ind], :] = BIG_NUMBER
                     idx[iRange[Ind]] = j
-
 
             maxDistToNewCentroids = 0
             for i in range(numberSignaturesToExtract):
@@ -184,25 +178,19 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
     idx = idxFinal
     clusterCompactness = clusterCompactnessFinal
 
-    centDist = mean(clusterCompactness, axis=1) #same
+    centDist = mean(clusterCompactness, axis=1) 
 
     # rearranging centroids with tightest clusters first
     centDistInd = numpy.argsort(centDist) #same
     clusterCompactness[...] = clusterCompactness[centDistInd, :] #same
     pcentroids = pcentroids[centDistInd, :]
 
-
-
     idxNew = numpy.copy(idx)
     # change naming of indices so best cluster is 1
     for i in range(numberSignaturesToExtract):
         idxNew[(idx == centDistInd[i])] = i 
-     #this doesnt do what you think it does.
 
-
-    idx[...] = idxNew # on the left side it becomes a copy
-
-
+    idx[...] = idxNew # override Python aliasing
 
     if numberSignaturesToExtract > 1:
         processStab[...] = sklearn.metrics.silhouette_samples(numpy.transpose(Wall), idx.ravel(), metric=DISTANCE_METRIC)
@@ -234,8 +222,6 @@ def custKMeans(Wall, Hall, numberSignaturesToExtract, TOTAL_REPLICATES, distance
 # Add zeros at indices that weak mutations were removed at previously
 def addWeak(mutationTypesToAddSet, processesOld, processesStdOld, wallOld, genomeErrorsOld, genomesReconstructedOld, processes, processesStd, Wall, genomeErrors, genomesReconstructed ):
 
-    
-
     origArrayIndex = 0
     for i in range(totalMutTypes):
         if ~any(mutationTypesToAddSet==i):
@@ -246,32 +232,6 @@ def addWeak(mutationTypesToAddSet, processesOld, processesStdOld, wallOld, genom
             genomesReconstructed[i, :, :] = genomesReconstructedOld[origArrayIndex, :, :]
             
             origArrayIndex = origArrayIndex + 1
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #take out the labels that came with the dataset
 inputfile = fetch_arg(sys.argv[1:])
@@ -286,11 +246,10 @@ Hall = numpy.zeros(shape=( NUM_SIGNATURES * ITERATIONS_PER_CORE * NUM_CORES , to
 genomeErrors = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE * NUM_CORES))
 genomesReconstructed = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE * NUM_CORES))
 
-
-
 for i in range(NUM_CORES): #smpd statement in matlab
     WPerCore = numpy.zeros(shape=(totalMutationTypes, NUM_SIGNATURES * ITERATIONS_PER_CORE ))
     HPerCore = numpy.zeros(shape=( NUM_SIGNATURES * ITERATIONS_PER_CORE , totalGenomes))
+
     # every iteration has an error in its reconstruction (which is a matrix)
     genomeErrorsPerCore = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE))
     genomesReconstructedPerCore = numpy.zeros(shape= (totalMutationTypes, totalGenomes, ITERATIONS_PER_CORE))
@@ -315,21 +274,12 @@ Hall = numpy.delete(Hall, removeIterationSets, 0)
 genomeErrors = numpy.delete(genomeErrors, removeIterationSets, 2)
 genomesReconstructed = numpy.delete(genomesReconstructed, removeIterationSets, 2)
 
-file = scipy.io.loadmat("./more code/filtered.mat")
-Wall = file['Wall']
-Hall = file['Hall']
-genomeErrors = file['genomeErrors']
-genomesReconstructed = file['genomesReconstructed'] 
-
-
-
-
 centroids = numpy.zeros((size(Wall,0), NUM_SIGNATURES)) 
 centroidsStd = numpy.zeros((size(centroids, 0), size(centroids,1))) # will later represent clustered signatures
 exposure = numpy.zeros((NUM_SIGNATURES,size(Hall,1)))
 exposureStd = numpy.zeros((NUM_SIGNATURES,size(Hall,1)))
-clusterCompactness = numpy.zeros((NUM_SIGNATURES, size(Wall, 1) / NUM_SIGNATURES)) #not the same
-idx = numpy.zeros(shape=(size(Hall, 0), 1)) #not the same
+clusterCompactness = numpy.zeros((NUM_SIGNATURES, size(Wall, 1) / NUM_SIGNATURES))
+idx = numpy.zeros(shape=(size(Hall, 0), 1)) 
 idxS = numpy.zeros(shape=(size(Hall, 0), 1))
 processStab = numpy.zeros(shape=(size(Wall,1)))
 processStabAvg = numpy.zeros(shape=(1, NUM_SIGNATURES))
@@ -343,14 +293,7 @@ WallNew = numpy.zeros((totalMutTypes, size(Wall,1)))
 genomeErrorsNew = numpy.zeros((totalMutTypes, size(genomeErrors, 1), NUM_BOOTSTRAPS))
 genomesReconstructedNew = numpy.zeros((totalMutTypes, size(genomeErrors, 1), NUM_BOOTSTRAPS))
 
-addWeak(numpy.array([50, 2, 26, 54, 21]), centroids,centroidsStd, Wall, genomeErrors, genomesReconstructed, processes, processesStd, WallNew, genomeErrorsNew, genomesReconstructedNew)
+addWeak(indicesToRemove, centroids,centroidsStd, Wall, genomeErrors, genomesReconstructed, processes, processesStd, WallNew, genomeErrorsNew, genomesReconstructedNew)
 
-error = numpy.linalg.norm(originalGenomes - centroids.dot(exposure))
-
+error = numpy.linalg.norm(originalGenomes - processes.dot(exposure))
 print 'Error : {}'.format(str(error))
-
-
-
-#extract(data, 1, 25, w, h)
-
-
